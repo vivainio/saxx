@@ -95,6 +95,21 @@ public class CompactTraceListener implements TraceListener {
         return null;
     }
 
+    private String extractAttributeValue(String systemId, int line, String attrName) {
+        List<String> lines = getFileLines(systemId);
+        if (line > 0 && line <= lines.size()) {
+            String content = lines.get(line - 1);
+            // Match attrName="value" or attrName='value'
+            Pattern p = Pattern.compile(attrName + "\\s*=\\s*\"([^\"]*)\"|" + attrName + "\\s*=\\s*'([^']*)'");
+            Matcher m = p.matcher(content);
+            if (m.find()) {
+                String result = m.group(1);
+                return result != null ? result : m.group(2);
+            }
+        }
+        return null;
+    }
+
     private String getFileAlias(String systemId) {
         if (systemId == null) return "?";
         return fileAliases.computeIfAbsent(systemId, k -> {
@@ -310,10 +325,24 @@ public class CompactTraceListener implements TraceListener {
                 return null;  // name shown in instruction type
             }
             if (t instanceof FixedAttribute) {
-                NodeName name = ((FixedAttribute) t).getAttributeName();
-                if (name != null) {
-                    return "@" + name.getDisplayName();
+                FixedAttribute fa = (FixedAttribute) t;
+                NodeName name = fa.getAttributeName();
+                String attrName = name != null ? name.getDisplayName() : "?";
+                // Try to extract value from source
+                Location loc = t.getLocation();
+                String fromSource = extractAttributeValue(loc.getSystemId(), loc.getLineNumber(), attrName);
+                if (fromSource != null) {
+                    return "@" + attrName + " = \"" + fromSource + "\"";
                 }
+                // Fallback to Saxon expression
+                Expression select = fa.getSelect();
+                if (select != null) {
+                    if (select instanceof StringLiteral) {
+                        return "@" + attrName + " = \"" + ((StringLiteral) select).getString() + "\"";
+                    }
+                    return "@" + attrName + " = " + select.toShortString();
+                }
+                return "@" + attrName;
             }
             if (t instanceof Block) {
                 int size = ((Block) t).size();
