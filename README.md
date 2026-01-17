@@ -49,6 +49,9 @@ python tasks.py build  # Build with Maven
 
 # With mock extension functions
 ./saxx check --deep --mocks mocks.json stylesheet.xsl
+
+# Deep check with execution trace
+./saxx check --deep --trace stylesheet.xsl
 ```
 
 ### transform - Transform XML using XSLT

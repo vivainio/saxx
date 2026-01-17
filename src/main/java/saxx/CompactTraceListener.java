@@ -10,6 +10,7 @@ import net.sf.saxon.trans.Mode;
 import net.sf.saxon.tree.util.Navigator;
 import net.sf.saxon.expr.Expression;
 import net.sf.saxon.expr.instruct.Block;
+import net.sf.saxon.expr.instruct.Choose;
 import net.sf.saxon.expr.instruct.NamedTemplate;
 import net.sf.saxon.expr.instruct.LocalParam;
 import net.sf.saxon.expr.StringLiteral;
@@ -32,7 +33,10 @@ public class CompactTraceListener implements TraceListener {
     private final Map<String, String> fileAliases = new LinkedHashMap<>();
     private final Map<String, List<String>> fileCache = new HashMap<>();
     private int nextAlias = 0;
-    private static final Pattern SELECT_PATTERN = Pattern.compile("select\\s*=\\s*[\"']([^\"']*)[\"']");
+    private boolean insideChoose = false;
+    private boolean showNextWhen = false;
+    private static final Pattern SELECT_PATTERN = Pattern.compile("select\\s*=\\s*\"([^\"]*)\"|select\\s*=\\s*'([^']*)'");
+    private static final Pattern TEST_PATTERN = Pattern.compile("test\\s*=\\s*\"([^\"]*)\"|test\\s*=\\s*'([^']*)'");
 
     public CompactTraceListener(PrintStream out) {
         this.out = out;
@@ -50,12 +54,43 @@ public class CompactTraceListener implements TraceListener {
     }
 
     private String extractSelect(String systemId, int line) {
+        return extractAttribute(systemId, line, SELECT_PATTERN);
+    }
+
+    private String extractTest(String systemId, int line) {
+        return extractAttribute(systemId, line, TEST_PATTERN);
+    }
+
+    private String findWhenCondition(String systemId, int actionLine) {
+        List<String> lines = getFileLines(systemId);
+        // Scan backwards from action line to find xsl:when or xsl:otherwise
+        for (int i = actionLine - 2; i >= 0 && i >= actionLine - 10; i--) {
+            String line = lines.get(i);
+            if (line.contains("<xsl:otherwise") || line.contains("xsl:otherwise>")) {
+                return "otherwise";
+            }
+            Matcher m = TEST_PATTERN.matcher(line);
+            if (m.find()) {
+                String result = m.group(1);
+                return result != null ? result : m.group(2);
+            }
+            // Stop if we hit the choose itself
+            if (line.contains("<xsl:choose")) {
+                break;
+            }
+        }
+        return null;
+    }
+
+    private String extractAttribute(String systemId, int line, Pattern pattern) {
         List<String> lines = getFileLines(systemId);
         if (line > 0 && line <= lines.size()) {
             String content = lines.get(line - 1);
-            Matcher m = SELECT_PATTERN.matcher(content);
+            Matcher m = pattern.matcher(content);
             if (m.find()) {
-                return m.group(1);
+                // Pattern has two groups: one for double-quoted, one for single-quoted
+                String result = m.group(1);
+                return result != null ? result : m.group(2);
             }
         }
         return null;
@@ -110,6 +145,20 @@ public class CompactTraceListener implements TraceListener {
             // Get instruction type and details
             String type = getInstructionType(traceable);
             String detail = getInstructionDetail(traceable);
+
+            // Track Choose to show which branch was taken
+            if (traceable instanceof Choose) {
+                showNextWhen = true;
+                depth++;
+                return;  // Don't print choose line yet - we'll show it with the branch
+            } else if (showNextWhen) {
+                showNextWhen = false;
+                String whenCond = findWhenCondition(loc.getSystemId(), line);
+                if (whenCond != null) {
+                    indent();
+                    out.printf("  choose -> %s%n", whenCond);
+                }
+            }
 
             // Print node change
             if (node != null && !node.equals(currentNode)) {
@@ -219,6 +268,19 @@ public class CompactTraceListener implements TraceListener {
                 if (select != null) {
                     return "select=\"" + select.toShortString() + "\"";
                 }
+            }
+            if (t instanceof Choose) {
+                Choose ch = (Choose) t;
+                int n = ch.size();
+                // Try to extract test from source (look at next line for xsl:when)
+                Location loc = t.getLocation();
+                String test = extractTest(loc.getSystemId(), loc.getLineNumber() + 1);
+                if (test != null) {
+                    return "[" + n + "] " + test;
+                }
+                // Fallback to Saxon's representation
+                Expression cond = ch.getCondition(0);
+                return "[" + n + "] " + cond.toShortString();
             }
             if (t instanceof ValueOf) {
                 Expression select = ((ValueOf) t).getSelect();

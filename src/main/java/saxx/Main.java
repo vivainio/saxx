@@ -50,12 +50,18 @@ public class Main implements Callable<Integer> {
         @Option(names = {"--mocks"}, description = "JSON file with mock extension function definitions")
         Path mocksFile,
         @Option(names = {"--ignore-extension-elements"}, description = "Treat unknown extension elements (e.g., <service:init/>) as warnings, not errors")
-        boolean ignoreExtensionElements
+        boolean ignoreExtensionElements,
+        @Option(names = {"--trace"}, description = "Trace XSLT execution during deep check")
+        boolean trace
     ) throws Exception {
         Processor processor = new Processor(false);
         loadGlobalMocks(processor);
         if (mocksFile != null) {
             registerMocks(processor, mocksFile);
+        }
+
+        if (trace) {
+            processor.getUnderlyingConfiguration().setCompileWithTracing(true);
         }
 
         XsltCompiler compiler = processor.newXsltCompiler();
@@ -84,13 +90,13 @@ public class Main implements Callable<Integer> {
                     skipped++;
                     continue;
                 }
-                result = checkFile(processor, compiler, file, deep, ignoreExtensionElements);
+                result = checkFile(processor, compiler, file, deep, ignoreExtensionElements, trace);
                 errors += result[0];
                 warnings += result[1];
                 checked++;
             }
         } else {
-            result = checkFile(processor, compiler, path, deep, ignoreExtensionElements);
+            result = checkFile(processor, compiler, path, deep, ignoreExtensionElements, trace);
             errors += result[0];
             warnings += result[1];
             checked++;
@@ -263,7 +269,7 @@ public class Main implements Callable<Integer> {
     private static final int[] ERROR = {1, 0};
     private static final int[] WARNING = {0, 1};
 
-    private int[] checkFile(Processor processor, XsltCompiler compiler, Path file, boolean deep, boolean ignoreExtensionElements) {
+    private int[] checkFile(Processor processor, XsltCompiler compiler, Path file, boolean deep, boolean ignoreExtensionElements, boolean trace) {
         try {
             XsltExecutable executable = compiler.compile(new StreamSource(file.toFile()));
 
@@ -275,10 +281,18 @@ public class Main implements Callable<Integer> {
                 if (!ignoredElements.isEmpty() || ignoreExtensionElements) {
                     transformer.setErrorReporter(err -> {});  // Suppress Saxon's error output
                 }
+                CompactTraceListener traceListener = null;
+                if (trace) {
+                    traceListener = new CompactTraceListener(System.err);
+                    transformer.setTraceListener(traceListener);
+                }
                 ByteArrayOutputStream devNull = new ByteArrayOutputStream();
                 Serializer serializer = processor.newSerializer(devNull);
                 StreamSource minimalInput = new StreamSource(new StringReader(minimalXml));
                 transformer.transform(minimalInput, serializer);
+                if (traceListener != null) {
+                    traceListener.close();
+                }
             }
 
             System.out.println("OK: " + file);
