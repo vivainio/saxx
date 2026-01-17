@@ -203,10 +203,6 @@ public class Main implements Callable<Integer> {
             }
         }
 
-        if (mockCount > 0 || elemCount > 0) {
-            System.out.printf("Mocks: %d functions, %d namespaces from %s%n",
-                mockCount, elemCount, mocksFile.getFileName());
-        }
     }
 
     private void loadGlobalMocks(Processor processor) {
