@@ -16,8 +16,7 @@ Use this skill to validate XSLT stylesheets against user test directories.
 Before using saxx, ensure it's built:
 
 ```bash
-python tasks.py deps   # One-time: download Saxon-HE fork
-python tasks.py build  # Build the JAR
+python tasks.py build  # Downloads deps and builds the JAR
 ```
 
 The JAR is at `target/saxx.jar`.
@@ -40,17 +39,61 @@ The JAR is at `target/saxx.jar`.
 # Deep check (compile + attempt transform to catch runtime errors)
 ./saxx check -r --skip-fragments --deep /path/to/xslt/
 
+# Deep check with execution trace
+./saxx check --deep --trace template.xsl
+
+# Trace to file instead of stderr
+./saxx check --deep --trace /tmp/trace.txt template.xsl
+
 # With mock extension functions
 ./saxx check --deep --mocks /tmp/mocks.json /path/to/xslt/
 ```
 
+## Running Transformations
+
+```bash
+./saxx transform -s stylesheet.xsl input.xml
+./saxx transform -s stylesheet.xsl input.xml -o output.xml
+
+# With execution trace (to stderr)
+./saxx transform -s stylesheet.xsl input.xml --trace
+
+# Trace to file
+./saxx transform -s stylesheet.xsl input.xml --trace /tmp/trace.txt
+```
+
+## Execution Tracing
+
+The `--trace` flag shows XSLT execution flow with actual values:
+
+```
+/:
+  template match="/"                                                    A:3
+    <result>                                                            A:4
+      call-template ($id='ABC-123', $name='Test User')                  A:5
+        template name="format"                                         A:11
+          param $id                                                    A:12
+          param $name                                                  A:13
+          <item>                                                       A:14
+            attribute @id = "ABC-123"                                  A:14
+            attribute @name = "Test User"                              A:14
+
+Files:
+  A = stylesheet.xsl
+```
+
 ## Mock Extension Functions
 
-For stylesheets using Xalan or other processor-specific extension functions, create a JSON file (outside the repo):
+Global mocks are loaded automatically from:
+- **Linux/macOS**: `~/.config/saxx/mocks.json`
+- **Windows**: `%APPDATA%\saxx\mocks.json`
+
+For additional mocks or overrides, use `--mocks`:
 
 ```json
 {
   "xalan://com.example.Extensions": {
+    "_elements": ["init", "setup"],
     "functionName": "return value",
     "boolFunc": true,
     "numFunc": 42,
@@ -59,15 +102,8 @@ For stylesheets using Xalan or other processor-specific extension functions, cre
 }
 ```
 
-Note: Only extension **functions** can be mocked. Extension **elements** (like `<ns:init/>`) cannot be mocked and will fail during deep checks.
-
-## Running Transformations
-
-```bash
-./saxx transform -s stylesheet.xsl input.xml
-./saxx transform -s stylesheet.xsl input.xml -o output.xml
-./saxx transform -s stylesheet.xsl input.xml --trace  # Trace execution
-```
+- `_elements`: Extension element names to treat as no-ops (e.g., `<ns:init/>`)
+- Other entries: Function name → return value (string, boolean, number, or null)
 
 ## Extracting XPath Mapping
 
