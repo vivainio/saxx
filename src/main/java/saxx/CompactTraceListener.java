@@ -158,7 +158,7 @@ public class CompactTraceListener implements TraceListener {
 
             // Get instruction type and details
             String type = getInstructionType(traceable);
-            String detail = getInstructionDetail(traceable);
+            String detail = getInstructionDetail(traceable, context);
 
             // Special handling for LocalParam to show value
             if (traceable instanceof LocalParam) {
@@ -274,7 +274,7 @@ public class CompactTraceListener implements TraceListener {
         return t.getClass().getSimpleName();
     }
 
-    private String getInstructionDetail(Traceable t) {
+    private String getInstructionDetail(Traceable t, XPathContext context) {
         try {
             if (t instanceof TemplateRule) {
                 return "match=\"" + ((TemplateRule) t).getMatchPattern().toShortString() + "\"";
@@ -328,19 +328,24 @@ public class CompactTraceListener implements TraceListener {
                 FixedAttribute fa = (FixedAttribute) t;
                 NodeName name = fa.getAttributeName();
                 String attrName = name != null ? name.getDisplayName() : "?";
-                // Try to extract value from source
-                Location loc = t.getLocation();
-                String fromSource = extractAttributeValue(loc.getSystemId(), loc.getLineNumber(), attrName);
-                if (fromSource != null) {
-                    return "@" + attrName + " = \"" + fromSource + "\"";
-                }
-                // Fallback to Saxon expression
                 Expression select = fa.getSelect();
                 if (select != null) {
-                    if (select instanceof StringLiteral) {
-                        return "@" + attrName + " = \"" + ((StringLiteral) select).getString() + "\"";
+                    // Try to evaluate the expression to get the actual value
+                    try {
+                        String value = select.evaluateAsString(context).toString();
+                        return "@" + attrName + " = \"" + value + "\"";
+                    } catch (Exception e) {
+                        // Fallback to source extraction
+                        Location loc = t.getLocation();
+                        String fromSource = extractAttributeValue(loc.getSystemId(), loc.getLineNumber(), attrName);
+                        if (fromSource != null) {
+                            return "@" + attrName + " = \"" + fromSource + "\"";
+                        }
+                        if (select instanceof StringLiteral) {
+                            return "@" + attrName + " = \"" + ((StringLiteral) select).getString() + "\"";
+                        }
+                        return "@" + attrName + " = " + select.toShortString();
                     }
-                    return "@" + attrName + " = " + select.toShortString();
                 }
                 return "@" + attrName;
             }
