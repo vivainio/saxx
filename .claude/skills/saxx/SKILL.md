@@ -75,8 +75,8 @@ The `--trace` flag shows XSLT execution flow with actual values:
           param $id                                                    A:12
           param $name                                                  A:13
           <item>                                                       A:14
-            attribute @id = "ABC-123"                                  A:14
-            attribute @name = "Test User"                              A:14
+            @id = "ABC-123"                                            A:14
+            @name = "Test User"                                        A:14
 
 Files:
   A = stylesheet.xsl

@@ -190,9 +190,12 @@ public class CompactTraceListener implements TraceListener {
             }
 
             // Build instruction text
-            String instr = detail != null && !detail.isEmpty()
-                ? type + " " + detail
-                : type;
+            String instr;
+            if (detail != null && !detail.isEmpty()) {
+                instr = type.isEmpty() ? detail : type + " " + detail;
+            } else {
+                instr = type;
+            }
 
             // Print with right-aligned location
             int indent = Math.min(depth, 20) * 2 + 2;  // current indent + leading spaces
@@ -253,7 +256,7 @@ public class CompactTraceListener implements TraceListener {
             NodeName name = ((FixedElement) t).getFixedElementName();
             return name != null ? "<" + name.getDisplayName() + ">" : "element";
         }
-        if (t instanceof FixedAttribute) return "attribute";
+        if (t instanceof FixedAttribute) return "";
         if (t instanceof Comment) return "comment";
         if (t instanceof ProcessingInstruction) return "pi";
         if (t instanceof Block) return "block";
