@@ -4,7 +4,17 @@ XSLT validation and transformation CLI tool powered by Saxon.
 
 ## Installation
 
-Requires Java 11+ and Maven.
+Requires Java 11+.
+
+Using [zipget](https://github.com/vivainio/zipget-rs):
+
+```bash
+zipget install vivainio/saxx
+```
+
+### Build from source
+
+Requires Maven.
 
 ```bash
 python tasks.py deps   # Download Saxon-HE fork (one-time)
