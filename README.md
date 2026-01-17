@@ -64,6 +64,27 @@ python tasks.py build  # Build with Maven
 ./saxx transform -s stylesheet.xsl input.xml --trace
 ```
 
+#### Execution Tracing
+
+The `--trace` flag shows XSLT execution flow:
+
+```
+/:
+  template match="/"                                                                             A:3
+    <output>                                                                                     A:4
+      <header>                                                                                   A:5
+        <title>                                                                                  A:6
+          ! "Test"                                                                               A:6
+      <body>                                                                                     A:8
+        for-each select="//item"                                                                 A:9
+        /root/item[1]:
+          <row>                                                                                 A:10
+            ! .                                                                                 A:10
+
+Files:
+  A = stylesheet.xsl
+```
+
 ### map - Extract XPath paths from XML
 
 ```bash
@@ -91,6 +112,26 @@ For `--deep` checks, you can mock external extension functions with a JSON file:
 
 - `_elements`: Extension element names to ignore (treated as no-ops)
 - Other entries: Function name → return value (string, boolean, number, or null)
+
+### Global Mocks
+
+Global mocks are loaded automatically from:
+- **Linux/macOS**: `~/.config/saxx/mocks.json`
+- **Windows**: `%APPDATA%\saxx\mocks.json`
+
+On first run, an empty `{}` file is created if it doesn't exist.
+
+Example:
+```json
+{
+  "xalan://com.example.Extensions": {
+    "_elements": ["init", "setup"],
+    "getValue": "default"
+  }
+}
+```
+
+The `--mocks` option adds to (or overrides) the global mocks.
 
 ## License
 

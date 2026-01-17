@@ -10,9 +10,17 @@ import net.sf.saxon.trans.Mode;
 import net.sf.saxon.tree.util.Navigator;
 import net.sf.saxon.expr.Expression;
 import net.sf.saxon.expr.instruct.Block;
+import net.sf.saxon.expr.instruct.NamedTemplate;
+import net.sf.saxon.expr.instruct.LocalParam;
+import net.sf.saxon.expr.StringLiteral;
 
 import java.io.PrintStream;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Compact YAML-like trace output with all instruction info.
@@ -22,10 +30,35 @@ public class CompactTraceListener implements TraceListener {
     private int depth = 0;
     private String currentNode = null;
     private final Map<String, String> fileAliases = new LinkedHashMap<>();
+    private final Map<String, List<String>> fileCache = new HashMap<>();
     private int nextAlias = 0;
+    private static final Pattern SELECT_PATTERN = Pattern.compile("select\\s*=\\s*[\"']([^\"']*)[\"']");
 
     public CompactTraceListener(PrintStream out) {
         this.out = out;
+    }
+
+    private List<String> getFileLines(String systemId) {
+        return fileCache.computeIfAbsent(systemId, k -> {
+            try {
+                URI uri = new URI(systemId);
+                return Files.readAllLines(Paths.get(uri));
+            } catch (Exception e) {
+                return Collections.emptyList();
+            }
+        });
+    }
+
+    private String extractSelect(String systemId, int line) {
+        List<String> lines = getFileLines(systemId);
+        if (line > 0 && line <= lines.size()) {
+            String content = lines.get(line - 1);
+            Matcher m = SELECT_PATTERN.matcher(content);
+            if (m.find()) {
+                return m.group(1);
+            }
+        }
+        return null;
     }
 
     private String getFileAlias(String systemId) {
@@ -92,7 +125,7 @@ public class CompactTraceListener implements TraceListener {
 
             // Print with right-aligned location
             int indent = Math.min(depth, 20) * 2 + 2;  // current indent + leading spaces
-            int totalWidth = 72;
+            int totalWidth = 100;
             int padWidth = totalWidth - indent - locRef.length();
             indent();
             out.printf("  %-" + Math.max(padWidth, instr.length() + 2) + "s%s%n", instr, locRef);
@@ -142,7 +175,7 @@ public class CompactTraceListener implements TraceListener {
         if (t instanceof CallTemplate) return "call-template";
         if (t instanceof ForEach) return "for-each";
         if (t instanceof Choose) return "choose";
-        if (t instanceof ValueOf) return "value-of";
+        if (t instanceof ValueOf) return "!";
         if (t instanceof Copy) return "copy";
         if (t instanceof CopyOf) return "copy-of";
         if (t instanceof FixedElement) {
@@ -153,6 +186,16 @@ public class CompactTraceListener implements TraceListener {
         if (t instanceof Comment) return "comment";
         if (t instanceof ProcessingInstruction) return "pi";
         if (t instanceof Block) return "block";
+        if (t instanceof NamedTemplate) {
+            NamedTemplate nt = (NamedTemplate) t;
+            return nt.getTemplateName() != null
+                ? "template name=\"" + nt.getTemplateName().getDisplayName() + "\""
+                : "template";
+        }
+        if (t instanceof LocalParam) {
+            LocalParam lp = (LocalParam) t;
+            return "param $" + lp.getVariableQName().getDisplayName();
+        }
         // Message class may not exist in all Saxon versions
         if (t instanceof ResultDocument) return "result-document";
         if (t instanceof IterateInstr) return "iterate";
@@ -179,10 +222,20 @@ public class CompactTraceListener implements TraceListener {
             }
             if (t instanceof ValueOf) {
                 Expression select = ((ValueOf) t).getSelect();
+                if (select instanceof StringLiteral) {
+                    String s = ((StringLiteral) select).getString().toString();
+                    if (s.length() > 30) s = s.substring(0, 27) + "...";
+                    return "\"" + s + "\"";
+                }
+                // Try to extract from source
+                Location loc = t.getLocation();
+                String fromSource = extractSelect(loc.getSystemId(), loc.getLineNumber());
+                if (fromSource != null) {
+                    return fromSource;
+                }
+                // Fallback to Saxon's representation
                 if (select != null) {
-                    String s = select.toShortString();
-                    if (s.length() > 40) s = s.substring(0, 37) + "...";
-                    return "select=\"" + s + "\"";
+                    return select.toShortString();
                 }
             }
             if (t instanceof FixedElement) {

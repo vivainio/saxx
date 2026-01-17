@@ -24,6 +24,18 @@ import java.util.stream.Collectors;
     description = "XSLT validation and transformation tool powered by Saxon"
 )
 public class Main implements Callable<Integer> {
+    private static final Path GLOBAL_MOCKS = getGlobalMocksPath();
+
+    private static Path getGlobalMocksPath() {
+        String os = System.getProperty("os.name").toLowerCase();
+        if (os.contains("win")) {
+            String appData = System.getenv("APPDATA");
+            if (appData != null) {
+                return Paths.get(appData, "saxx", "mocks.json");
+            }
+        }
+        return Paths.get(System.getProperty("user.home"), ".config", "saxx", "mocks.json");
+    }
 
     @Command(name = "check", description = "Check/compile XSLT stylesheets")
     int check(
@@ -41,7 +53,7 @@ public class Main implements Callable<Integer> {
         boolean ignoreExtensionElements
     ) throws Exception {
         Processor processor = new Processor(false);
-
+        loadGlobalMocks(processor);
         if (mocksFile != null) {
             registerMocks(processor, mocksFile);
         }
@@ -182,8 +194,26 @@ public class Main implements Callable<Integer> {
         }
 
         if (mockCount > 0 || elemCount > 0) {
-            System.out.printf("Registered %d mock function(s), %d extension element namespace(s)%n",
-                mockCount, elemCount);
+            System.out.printf("Mocks: %d functions, %d namespaces from %s%n",
+                mockCount, elemCount, mocksFile.getFileName());
+        }
+    }
+
+    private void loadGlobalMocks(Processor processor) {
+        if (!Files.exists(GLOBAL_MOCKS)) {
+            try {
+                Files.createDirectories(GLOBAL_MOCKS.getParent());
+                Files.writeString(GLOBAL_MOCKS, "{}\n");
+                System.err.println("Created global mocks file: " + GLOBAL_MOCKS);
+            } catch (Exception e) {
+                // Ignore - may not have write permission
+            }
+            return;
+        }
+        try {
+            registerMocks(processor, GLOBAL_MOCKS);
+        } catch (Exception e) {
+            System.err.println("Warning: failed to load global mocks from " + GLOBAL_MOCKS + ": " + e.getMessage());
         }
     }
 
@@ -311,7 +341,7 @@ public class Main implements Callable<Integer> {
         Path mocksFile
     ) throws Exception {
         Processor processor = new Processor(false);
-
+        loadGlobalMocks(processor);
         if (mocksFile != null) {
             registerMocks(processor, mocksFile);
         }
