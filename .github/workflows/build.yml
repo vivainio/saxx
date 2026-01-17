@@ -20,10 +20,11 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: Clone and install Saxon-HE-fork
+      - name: Download and install Saxon-HE-fork
         run: |
-          git clone https://github.com/vivainio/saxon-work.git ../saxon-work
-          cd ../saxon-work
+          curl -sL https://github.com/vivainio/Saxon-HE-fork/archive/refs/heads/main.zip -o saxon.zip
+          unzip -q saxon.zip
+          cd Saxon-HE-fork-main
           mvn -B install -DskipTests
 
       - name: Build and test
