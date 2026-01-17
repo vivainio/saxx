@@ -320,7 +320,29 @@ public class CompactTraceListener implements TraceListener {
                 return "[" + size + " items]";
             }
             if (t instanceof CallTemplate) {
-                // Template name access varies by Saxon version
+                CallTemplate ct = (CallTemplate) t;
+                WithParam[] params = ct.getActualParams();
+                if (params != null && params.length > 0) {
+                    StringBuilder sb = new StringBuilder();
+                    for (WithParam wp : params) {
+                        if (sb.length() > 0) sb.append(", ");
+                        sb.append("$").append(wp.getVariableQName().getLocalPart());
+                        Expression select = wp.getSelectExpression();
+                        if (select != null) {
+                            // Try to get from source first
+                            Location loc = wp.getSelectOperand().getChildExpression().getLocation();
+                            String fromSource = extractSelect(loc.getSystemId(), loc.getLineNumber());
+                            if (fromSource != null) {
+                                sb.append("=").append(fromSource);
+                            } else if (select instanceof StringLiteral) {
+                                sb.append("=\"").append(((StringLiteral) select).getString()).append("\"");
+                            } else {
+                                sb.append("=").append(select.toShortString());
+                            }
+                        }
+                    }
+                    return "(" + sb + ")";
+                }
                 return null;
             }
             if (t instanceof LocalParam) {
