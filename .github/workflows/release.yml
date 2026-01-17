@@ -27,7 +27,9 @@ jobs:
           recipe: zipget.toml
 
       - name: Install Saxon-HE-fork to Maven local repo
-        run: mvn install:install-file -Dfile=Saxon-HE-fork-12.9.1.jar -DgroupId=net.sf.saxon -DartifactId=Saxon-HE-fork -Dversion=12.9.1 -Dpackaging=jar
+        run: |
+          VERSION=$(grep -A1 Saxon-HE-fork pom.xml | grep version | sed 's/.*>\(.*\)<.*/\1/')
+          mvn install:install-file -Dfile=saxon-he-fork.jar -DgroupId=net.sf.saxon -DartifactId=Saxon-HE-fork -Dversion=$VERSION -Dpackaging=jar
 
       - name: Set version from tag
         run: mvn versions:set -DnewVersion=${GITHUB_REF_NAME#v} -DgenerateBackupFiles=false
