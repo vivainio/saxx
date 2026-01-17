@@ -6,6 +6,7 @@ import net.sf.saxon.lib.TraceListener;
 import net.sf.saxon.om.*;
 import net.sf.saxon.s9api.Location;
 import net.sf.saxon.trace.Traceable;
+import net.sf.saxon.tree.AttributeLocation;
 import net.sf.saxon.trans.Mode;
 import net.sf.saxon.tree.util.Navigator;
 import net.sf.saxon.expr.Expression;
@@ -32,12 +33,13 @@ public class CompactTraceListener implements TraceListener {
     private final Map<String, String> fileAliases = new LinkedHashMap<>();
     private final Map<String, List<String>> fileCache = new HashMap<>();
     private int nextAlias = 0;
-    private boolean insideChoose = false;
     private boolean showNextWhen = false;
-    private static final Pattern SELECT_PATTERN = Pattern.compile("select\\s*=\\s*\"([^\"]*)\"|select\\s*=\\s*'([^']*)'");
+    // Pattern for extracting test attribute (used for choose/when detection)
     private static final Pattern TEST_PATTERN = Pattern.compile("test\\s*=\\s*\"([^\"]*)\"|test\\s*=\\s*'([^']*)'");
     // Common XPath wrapper functions to unwrap for cleaner display
     private static final Pattern NORMALIZE_SPACE_PATTERN = Pattern.compile("^(?:fn:)?normalize-space\\((.+)\\)$");
+
+    private static final String XSLT_NS = "http://www.w3.org/1999/XSL/Transform";
 
     public CompactTraceListener(PrintStream out) {
         this.out = out;
@@ -54,14 +56,27 @@ public class CompactTraceListener implements TraceListener {
         });
     }
 
-    private String extractSelect(String systemId, int line) {
-        return extractAttribute(systemId, line, SELECT_PATTERN);
+    /**
+     * Unwrap NestedLocation to find the containing AttributeLocation.
+     */
+    private AttributeLocation unwrapToAttributeLocation(Location loc) {
+        while (loc != null && !(loc instanceof AttributeLocation)) {
+            if (loc instanceof net.sf.saxon.expr.parser.Loc) {
+                break; // Simple location, no parent
+            }
+            try {
+                java.lang.reflect.Method m = loc.getClass().getMethod("getContainingLocation");
+                loc = (Location) m.invoke(loc);
+            } catch (Exception e) {
+                break;
+            }
+        }
+        return (loc instanceof AttributeLocation) ? (AttributeLocation) loc : null;
     }
 
-    private String extractTest(String systemId, int line) {
-        return extractAttribute(systemId, line, TEST_PATTERN);
-    }
-
+    /**
+     * Find the xsl:when or xsl:otherwise condition by scanning backwards in the source file.
+     */
     private String findWhenCondition(String systemId, int actionLine) {
         List<String> lines = getFileLines(systemId);
         // Scan backwards from action line to find xsl:when or xsl:otherwise
@@ -78,20 +93,6 @@ public class CompactTraceListener implements TraceListener {
             // Stop if we hit the choose itself
             if (line.contains("<xsl:choose")) {
                 break;
-            }
-        }
-        return null;
-    }
-
-    private String extractAttribute(String systemId, int line, Pattern pattern) {
-        List<String> lines = getFileLines(systemId);
-        if (line > 0 && line <= lines.size()) {
-            String content = lines.get(line - 1);
-            Matcher m = pattern.matcher(content);
-            if (m.find()) {
-                // Pattern has two groups: one for double-quoted, one for single-quoted
-                String result = m.group(1);
-                return result != null ? result : m.group(2);
             }
         }
         return null;
@@ -129,19 +130,16 @@ public class CompactTraceListener implements TraceListener {
         return result;
     }
 
-    private String extractAttributeValue(String systemId, int line, String attrName) {
-        List<String> lines = getFileLines(systemId);
-        if (line > 0 && line <= lines.size()) {
-            String content = lines.get(line - 1);
-            // Match attrName="value" or attrName='value'
-            Pattern p = Pattern.compile(attrName + "\\s*=\\s*\"([^\"]*)\"|" + attrName + "\\s*=\\s*'([^']*)'");
-            Matcher m = p.matcher(content);
-            if (m.find()) {
-                String result = m.group(1);
-                return result != null ? result : m.group(2);
-            }
-        }
-        return null;
+    /**
+     * Get original XPath from an Expression's location.
+     */
+    private String getOriginalXPathFromExpr(Expression expr, String attrName) {
+        if (expr == null) return null;
+        AttributeLocation attrLoc = unwrapToAttributeLocation(expr.getLocation());
+        if (attrLoc == null) return null;
+        NodeInfo elem = attrLoc.getElementNode();
+        if (elem == null) return null;
+        return elem.getAttributeValue("", attrName);
     }
 
     private String getFileAlias(String systemId) {
@@ -314,32 +312,48 @@ public class CompactTraceListener implements TraceListener {
     private String getInstructionDetail(Traceable t, XPathContext context) {
         try {
             if (t instanceof TemplateRule) {
-                return "match=\"" + simplifyXPathInExpr(((TemplateRule) t).getMatchPattern().toShortString()) + "\"";
+                // Try to extract from pattern's location (AttributeLocation)
+                net.sf.saxon.pattern.Pattern pattern = ((TemplateRule) t).getMatchPattern();
+                AttributeLocation attrLoc = unwrapToAttributeLocation(pattern.getLocation());
+                if (attrLoc != null) {
+                    NodeInfo elem = attrLoc.getElementNode();
+                    if (elem != null) {
+                        String fromSource = elem.getAttributeValue("", "match");
+                        if (fromSource != null) {
+                            return "match=\"" + simplifyXPathInExpr(fromSource) + "\"";
+                        }
+                    }
+                }
+                return "match=\"" + simplifyXPathInExpr(pattern.toString()) + "\"";
             }
             if (t instanceof ApplyTemplates) {
                 Expression select = ((ApplyTemplates) t).getSelectExpression();
                 if (select != null) {
-                    return "select=\"" + simplifyXPathInExpr(select.toShortString()) + "\"";
+                    // Try to extract from expression's location (AttributeLocation)
+                    String fromSource = getOriginalXPathFromExpr(select, "select");
+                    if (fromSource != null) {
+                        return "select=\"" + simplifyXPathInExpr(fromSource) + "\"";
+                    }
+                    return "select=\"" + simplifyXPathInExpr(select.toString()) + "\"";
                 }
             }
             if (t instanceof ForEach) {
                 Expression select = ((ForEach) t).getSelectExpression();
                 if (select != null) {
-                    return "select=\"" + simplifyXPathInExpr(select.toShortString()) + "\"";
+                    // Try to extract from expression's location (AttributeLocation)
+                    String fromSource = getOriginalXPathFromExpr(select, "select");
+                    if (fromSource != null) {
+                        return "select=\"" + simplifyXPathInExpr(fromSource) + "\"";
+                    }
+                    return "select=\"" + simplifyXPathInExpr(select.toString()) + "\"";
                 }
             }
             if (t instanceof Choose) {
                 Choose ch = (Choose) t;
                 int n = ch.size();
-                // Try to extract test from source (look at next line for xsl:when)
-                Location loc = t.getLocation();
-                String test = extractTest(loc.getSystemId(), loc.getLineNumber() + 1);
-                if (test != null) {
-                    return "[" + n + "] " + test;
-                }
-                // Fallback to Saxon's representation
+                // Use Saxon's representation for first condition
                 Expression cond = ch.getCondition(0);
-                return "[" + n + "] " + cond.toShortString();
+                return "[" + n + "] " + cond.toString();
             }
             if (t instanceof ValueOf) {
                 Expression select = ((ValueOf) t).getSelect();
@@ -347,15 +361,14 @@ public class CompactTraceListener implements TraceListener {
                     String s = ((StringLiteral) select).getString().toString();
                     return "\"" + s + "\"";
                 }
-                // Try to extract from source
-                Location loc = t.getLocation();
-                String fromSource = extractSelect(loc.getSystemId(), loc.getLineNumber());
+                // Try to extract from expression's location (AttributeLocation)
+                String fromSource = getOriginalXPathFromExpr(select, "select");
                 if (fromSource != null) {
                     return simplifyXPathInExpr(fromSource);
                 }
                 // Fallback to Saxon's representation
                 if (select != null) {
-                    return simplifyXPathInExpr(select.toShortString());
+                    return simplifyXPathInExpr(select.toString());
                 }
             }
             if (t instanceof FixedElement) {
@@ -372,16 +385,10 @@ public class CompactTraceListener implements TraceListener {
                         String value = select.evaluateAsString(context).toString();
                         return "@" + attrName + " = \"" + value + "\"";
                     } catch (Exception e) {
-                        // Fallback to source extraction
-                        Location loc = t.getLocation();
-                        String fromSource = extractAttributeValue(loc.getSystemId(), loc.getLineNumber(), attrName);
-                        if (fromSource != null) {
-                            return "@" + attrName + " = \"" + fromSource + "\"";
-                        }
                         if (select instanceof StringLiteral) {
                             return "@" + attrName + " = \"" + ((StringLiteral) select).getString() + "\"";
                         }
-                        return "@" + attrName + " = " + select.toShortString();
+                        return "@" + attrName + " = " + select.toString();
                     }
                 }
                 return "@" + attrName;
@@ -400,15 +407,14 @@ public class CompactTraceListener implements TraceListener {
                         sb.append("$").append(wp.getVariableQName().getLocalPart());
                         Expression select = wp.getSelectExpression();
                         if (select != null) {
-                            // Try to get from source first
-                            Location loc = wp.getSelectOperand().getChildExpression().getLocation();
-                            String fromSource = extractSelect(loc.getSystemId(), loc.getLineNumber());
+                            // Try to get from expression's location (AttributeLocation)
+                            String fromSource = getOriginalXPathFromExpr(select, "select");
                             if (fromSource != null) {
                                 sb.append("=").append(simplifyXPathInExpr(fromSource));
                             } else if (select instanceof StringLiteral) {
                                 sb.append("=\"").append(((StringLiteral) select).getString()).append("\"");
                             } else {
-                                sb.append("=").append(simplifyXPathInExpr(select.toShortString()));
+                                sb.append("=").append(simplifyXPathInExpr(select.toString()));
                             }
                         }
                     }
@@ -427,10 +433,10 @@ public class CompactTraceListener implements TraceListener {
     }
 
     private String getParamValue(LocalParam lp, XPathContext context, Map<String, Object> properties) {
-        // Try to extract select attribute from source (shows actual default value expression)
+        // Try to extract select attribute from expression's location (AttributeLocation)
         try {
-            Location loc = lp.getLocation();
-            String fromSource = extractSelect(loc.getSystemId(), loc.getLineNumber());
+            Expression select = lp.getSelectExpression();
+            String fromSource = getOriginalXPathFromExpr(select, "select");
             if (fromSource != null) {
                 return "select=\"" + fromSource + "\"";
             }

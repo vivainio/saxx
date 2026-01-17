@@ -6,6 +6,7 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
 import net.sf.saxon.Configuration;
+import net.sf.saxon.lib.Feature;
 import net.sf.saxon.s9api.*;
 import javax.xml.transform.stream.StreamSource;
 import java.io.ByteArrayOutputStream;
@@ -65,6 +66,8 @@ public class Main implements Callable<Integer> {
         PrintStream traceOut = null;
         if (trace) {
             processor.getUnderlyingConfiguration().setCompileWithTracing(true);
+            processor.getUnderlyingConfiguration()
+                .setBooleanProperty(Feature.RETAIN_NODE_FOR_DIAGNOSTICS, true);
             traceOut = traceFile.isEmpty() ? System.err : new PrintStream(traceFile);
         }
 
@@ -364,6 +367,8 @@ public class Main implements Callable<Integer> {
         PrintStream traceOut = null;
         if (trace) {
             processor.getUnderlyingConfiguration().setCompileWithTracing(true);
+            processor.getUnderlyingConfiguration()
+                .setBooleanProperty(Feature.RETAIN_NODE_FOR_DIAGNOSTICS, true);
             traceOut = traceFile.isEmpty() ? System.err : new PrintStream(traceFile);
         }
 
