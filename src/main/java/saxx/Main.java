@@ -10,6 +10,7 @@ import net.sf.saxon.s9api.*;
 import javax.xml.transform.stream.StreamSource;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.PrintStream;
 import java.io.StringReader;
 import java.nio.file.*;
 import java.util.*;
@@ -51,8 +52,8 @@ public class Main implements Callable<Integer> {
         Path mocksFile,
         @Option(names = {"--ignore-extension-elements"}, description = "Treat unknown extension elements (e.g., <service:init/>) as warnings, not errors")
         boolean ignoreExtensionElements,
-        @Option(names = {"--trace"}, description = "Trace XSLT execution during deep check")
-        boolean trace
+        @Option(names = {"--trace"}, description = "Trace XSLT execution (optionally to file)", arity = "0..1", fallbackValue = "")
+        String traceFile
     ) throws Exception {
         Processor processor = new Processor(false);
         loadGlobalMocks(processor);
@@ -60,8 +61,11 @@ public class Main implements Callable<Integer> {
             registerMocks(processor, mocksFile);
         }
 
+        boolean trace = traceFile != null;
+        PrintStream traceOut = null;
         if (trace) {
             processor.getUnderlyingConfiguration().setCompileWithTracing(true);
+            traceOut = traceFile.isEmpty() ? System.err : new PrintStream(traceFile);
         }
 
         XsltCompiler compiler = processor.newXsltCompiler();
@@ -90,13 +94,13 @@ public class Main implements Callable<Integer> {
                     skipped++;
                     continue;
                 }
-                result = checkFile(processor, compiler, file, deep, ignoreExtensionElements, trace);
+                result = checkFile(processor, compiler, file, deep, ignoreExtensionElements, traceOut);
                 errors += result[0];
                 warnings += result[1];
                 checked++;
             }
         } else {
-            result = checkFile(processor, compiler, path, deep, ignoreExtensionElements, trace);
+            result = checkFile(processor, compiler, path, deep, ignoreExtensionElements, traceOut);
             errors += result[0];
             warnings += result[1];
             checked++;
@@ -269,7 +273,7 @@ public class Main implements Callable<Integer> {
     private static final int[] ERROR = {1, 0};
     private static final int[] WARNING = {0, 1};
 
-    private int[] checkFile(Processor processor, XsltCompiler compiler, Path file, boolean deep, boolean ignoreExtensionElements, boolean trace) {
+    private int[] checkFile(Processor processor, XsltCompiler compiler, Path file, boolean deep, boolean ignoreExtensionElements, PrintStream traceOut) {
         try {
             XsltExecutable executable = compiler.compile(new StreamSource(file.toFile()));
 
@@ -282,8 +286,8 @@ public class Main implements Callable<Integer> {
                     transformer.setErrorReporter(err -> {});  // Suppress Saxon's error output
                 }
                 CompactTraceListener traceListener = null;
-                if (trace) {
-                    traceListener = new CompactTraceListener(System.err);
+                if (traceOut != null) {
+                    traceListener = new CompactTraceListener(traceOut);
                     transformer.setTraceListener(traceListener);
                 }
                 ByteArrayOutputStream devNull = new ByteArrayOutputStream();
@@ -349,8 +353,8 @@ public class Main implements Callable<Integer> {
         Path input,
         @Option(names = {"-o", "--output"}, description = "Output file (stdout if omitted)")
         Path output,
-        @Option(names = {"--trace"}, description = "Trace XSLT execution (node, instruction, location)")
-        boolean trace,
+        @Option(names = {"--trace"}, description = "Trace XSLT execution (optionally to file)", arity = "0..1", fallbackValue = "")
+        String traceFile,
         @Option(names = {"--mocks"}, description = "JSON file with mock extension function definitions")
         Path mocksFile
     ) throws Exception {
@@ -360,8 +364,11 @@ public class Main implements Callable<Integer> {
             registerMocks(processor, mocksFile);
         }
 
+        boolean trace = traceFile != null;
+        PrintStream traceOut = null;
         if (trace) {
             processor.getUnderlyingConfiguration().setCompileWithTracing(true);
+            traceOut = traceFile.isEmpty() ? System.err : new PrintStream(traceFile);
         }
 
         XsltCompiler compiler = processor.newXsltCompiler();
@@ -370,7 +377,7 @@ public class Main implements Callable<Integer> {
 
         CompactTraceListener traceListener = null;
         if (trace) {
-            traceListener = new CompactTraceListener(System.err);
+            traceListener = new CompactTraceListener(traceOut);
             transformer.setTraceListener(traceListener);
         }
 
