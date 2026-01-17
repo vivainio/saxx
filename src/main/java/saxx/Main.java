@@ -324,8 +324,10 @@ public class Main implements Callable<Integer> {
         XsltExecutable executable = compiler.compile(new StreamSource(stylesheet.toFile()));
         Xslt30Transformer transformer = executable.load30();
 
+        CompactTraceListener traceListener = null;
         if (trace) {
-            transformer.setTraceListener(new CompactTraceListener(System.err));
+            traceListener = new CompactTraceListener(System.err);
+            transformer.setTraceListener(traceListener);
         }
 
         Serializer serializer = output != null
@@ -333,6 +335,10 @@ public class Main implements Callable<Integer> {
             : processor.newSerializer(System.out);
 
         transformer.transform(new StreamSource(input.toFile()), serializer);
+
+        if (traceListener != null) {
+            traceListener.close();
+        }
         return 0;
     }
 

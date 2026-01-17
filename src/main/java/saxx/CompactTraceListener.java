@@ -9,6 +9,7 @@ import net.sf.saxon.trace.Traceable;
 import net.sf.saxon.trans.Mode;
 import net.sf.saxon.tree.util.Navigator;
 import net.sf.saxon.expr.Expression;
+import net.sf.saxon.expr.instruct.Block;
 
 import java.io.PrintStream;
 import java.util.*;
@@ -20,9 +21,25 @@ public class CompactTraceListener implements TraceListener {
     private final PrintStream out;
     private int depth = 0;
     private String currentNode = null;
+    private final Map<String, String> fileAliases = new LinkedHashMap<>();
+    private int nextAlias = 0;
 
     public CompactTraceListener(PrintStream out) {
         this.out = out;
+    }
+
+    private String getFileAlias(String systemId) {
+        if (systemId == null) return "?";
+        return fileAliases.computeIfAbsent(systemId, k -> {
+            // Generate alias: A, B, C, ... Z, AA, AB, ...
+            int n = nextAlias++;
+            StringBuilder sb = new StringBuilder();
+            do {
+                sb.insert(0, (char) ('A' + (n % 26)));
+                n = n / 26 - 1;
+            } while (n >= 0);
+            return sb.toString();
+        });
     }
 
     @Override
@@ -32,7 +49,15 @@ public class CompactTraceListener implements TraceListener {
     public void open(net.sf.saxon.Controller controller) {}
 
     @Override
-    public void close() {}
+    public void close() {
+        if (!fileAliases.isEmpty()) {
+            out.println();
+            out.println("Files:");
+            for (Map.Entry<String, String> e : fileAliases.entrySet()) {
+                out.printf("  %s = %s%n", e.getValue(), getShortModule(e.getKey()));
+            }
+        }
+    }
 
     @Override
     public void enter(Traceable traceable, Map<String, Object> properties, XPathContext context) {
@@ -45,8 +70,9 @@ public class CompactTraceListener implements TraceListener {
 
             // Get location info
             Location loc = traceable.getLocation();
-            String module = getShortModule(loc.getSystemId());
+            String alias = getFileAlias(loc.getSystemId());
             int line = loc.getLineNumber();
+            String locRef = alias + ":" + line;
 
             // Get instruction type and details
             String type = getInstructionType(traceable);
@@ -59,13 +85,17 @@ public class CompactTraceListener implements TraceListener {
                 currentNode = node;
             }
 
-            // Print instruction
+            // Build instruction text
+            String instr = detail != null && !detail.isEmpty()
+                ? type + " " + detail
+                : type;
+
+            // Print with right-aligned location
+            int indent = Math.min(depth, 20) * 2 + 2;  // current indent + leading spaces
+            int totalWidth = 72;
+            int padWidth = totalWidth - indent - locRef.length();
             indent();
-            if (detail != null && !detail.isEmpty()) {
-                out.printf("  %s %s  # %s:%d%n", type, detail, module, line);
-            } else {
-                out.printf("  %s  # %s:%d%n", type, module, line);
-            }
+            out.printf("  %-" + Math.max(padWidth, instr.length() + 2) + "s%s%n", instr, locRef);
 
             depth++;
         } catch (Exception e) {
@@ -115,10 +145,14 @@ public class CompactTraceListener implements TraceListener {
         if (t instanceof ValueOf) return "value-of";
         if (t instanceof Copy) return "copy";
         if (t instanceof CopyOf) return "copy-of";
-        if (t instanceof FixedElement) return "element";
+        if (t instanceof FixedElement) {
+            NodeName name = ((FixedElement) t).getFixedElementName();
+            return name != null ? "<" + name.getDisplayName() + ">" : "element";
+        }
         if (t instanceof FixedAttribute) return "attribute";
         if (t instanceof Comment) return "comment";
         if (t instanceof ProcessingInstruction) return "pi";
+        if (t instanceof Block) return "block";
         // Message class may not exist in all Saxon versions
         if (t instanceof ResultDocument) return "result-document";
         if (t instanceof IterateInstr) return "iterate";
@@ -152,11 +186,17 @@ public class CompactTraceListener implements TraceListener {
                 }
             }
             if (t instanceof FixedElement) {
-                // Element name access varies by Saxon version
-                return null;
+                return null;  // name shown in instruction type
             }
             if (t instanceof FixedAttribute) {
-                return null;
+                NodeName name = ((FixedAttribute) t).getAttributeName();
+                if (name != null) {
+                    return "@" + name.getDisplayName();
+                }
+            }
+            if (t instanceof Block) {
+                int size = ((Block) t).size();
+                return "[" + size + " items]";
             }
             if (t instanceof CallTemplate) {
                 // Template name access varies by Saxon version

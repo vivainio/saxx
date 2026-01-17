@@ -10,32 +10,36 @@ import textwrap
 # === TASKS (add your do_ functions here) ===
 
 
-SAXON_VERSION = "12.9.1"
-SAXON_JAR = f"Saxon-HE-fork-{SAXON_VERSION}.jar"
-SAXON_URL = f"https://github.com/vivainio/Saxon-HE-fork/releases/download/v{SAXON_VERSION}/{SAXON_JAR}"
+def get_saxon_version() -> str:
+    """Extract Saxon-HE-fork version from pom.xml"""
+    import re
+    with open("pom.xml") as f:
+        content = f.read()
+    match = re.search(r"Saxon-HE-fork</artifactId>\s*<version>([^<]+)</version>", content)
+    if not match:
+        raise RuntimeError("Could not find Saxon-HE-fork version in pom.xml")
+    return match.group(1)
 
 
 def do_deps(args) -> None:
-    """Download Saxon-HE fork from GitHub releases and install to local Maven repo"""
-    import urllib.request
-
-    jar_path = f"target/{SAXON_JAR}"
-    os.makedirs("target", exist_ok=True)
+    """Download Saxon-HE fork using zipget and install to local Maven repo"""
+    jar_path = "saxon-he-fork.jar"
 
     if not os.path.exists(jar_path):
-        emit(f"Downloading {SAXON_URL}")
-        urllib.request.urlretrieve(SAXON_URL, jar_path)
+        c("zipget recipe zipget.toml")
     else:
         emit(f"Already downloaded: {jar_path}")
 
+    version = get_saxon_version()
     c(f"mvn install:install-file -Dfile={jar_path} "
       f"-DgroupId=net.sf.saxon -DartifactId=Saxon-HE-fork "
-      f"-Dversion={SAXON_VERSION} -Dpackaging=jar -q")
-    emit("Saxon-HE fork installed to local Maven repo")
+      f"-Dversion={version} -Dpackaging=jar -q")
+    emit(f"Saxon-HE fork {version} installed to local Maven repo")
 
 
 def do_build(args) -> None:
-    """Build the project with Maven"""
+    """Build the project with Maven (installs deps first)"""
+    do_deps([])
     c("mvn package -DskipTests -q")
 
 
