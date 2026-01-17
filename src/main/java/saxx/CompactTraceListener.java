@@ -14,7 +14,6 @@ import net.sf.saxon.expr.instruct.Choose;
 import net.sf.saxon.expr.instruct.NamedTemplate;
 import net.sf.saxon.expr.instruct.LocalParam;
 import net.sf.saxon.expr.StringLiteral;
-
 import java.io.PrintStream;
 import java.net.URI;
 import java.nio.file.Files;
@@ -145,6 +144,14 @@ public class CompactTraceListener implements TraceListener {
             // Get instruction type and details
             String type = getInstructionType(traceable);
             String detail = getInstructionDetail(traceable);
+
+            // Special handling for LocalParam to show value
+            if (traceable instanceof LocalParam) {
+                String paramValue = getParamValue((LocalParam) traceable, context, properties);
+                if (paramValue != null) {
+                    detail = paramValue;
+                }
+            }
 
             // Track Choose to show which branch was taken
             if (traceable instanceof Choose) {
@@ -286,7 +293,6 @@ public class CompactTraceListener implements TraceListener {
                 Expression select = ((ValueOf) t).getSelect();
                 if (select instanceof StringLiteral) {
                     String s = ((StringLiteral) select).getString().toString();
-                    if (s.length() > 30) s = s.substring(0, 27) + "...";
                     return "\"" + s + "\"";
                 }
                 // Try to extract from source
@@ -317,9 +323,28 @@ public class CompactTraceListener implements TraceListener {
                 // Template name access varies by Saxon version
                 return null;
             }
+            if (t instanceof LocalParam) {
+                // Value will be added via context in enter()
+                return null;
+            }
         } catch (Exception e) {
             // Ignore
         }
+        return null;
+    }
+
+    private String getParamValue(LocalParam lp, XPathContext context, Map<String, Object> properties) {
+        // Try to extract select attribute from source (shows actual default value expression)
+        try {
+            Location loc = lp.getLocation();
+            String fromSource = extractSelect(loc.getSystemId(), loc.getLineNumber());
+            if (fromSource != null) {
+                return "select=\"" + fromSource + "\"";
+            }
+        } catch (Exception e) {
+            // Ignore
+        }
+        // No select in source - param value comes from with-param (not available at trace time)
         return null;
     }
 
