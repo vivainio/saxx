@@ -190,6 +190,10 @@ public class CompactTraceListener implements TraceListener {
 
             // Get instruction type and details
             String type = getInstructionType(traceable);
+            if (type == null) {
+                depth++;
+                return;  // Skip internal/noise instructions
+            }
             String detail = getInstructionDetail(traceable, context);
 
             // Special handling for LocalParam to show value
@@ -230,11 +234,24 @@ public class CompactTraceListener implements TraceListener {
             }
 
             // Print with right-aligned location
-            int indent = Math.min(depth, 20) * 2 + 2;  // current indent + leading spaces
+            int indentSize = Math.min(depth, 20) * 2 + 2;  // current indent + leading spaces
             int totalWidth = 100;
-            int padWidth = totalWidth - indent - locRef.length();
-            indent();
-            out.printf("  %-" + Math.max(padWidth, instr.length() + 2) + "s%s%n", instr, locRef);
+
+            // Handle multi-line detail (e.g., call-template with many params)
+            if (instr.contains("\n")) {
+                String[] lines = instr.split("\n");
+                int padWidth = totalWidth - indentSize - locRef.length();
+                indent();
+                out.printf("  %-" + Math.max(padWidth, lines[0].length() + 2) + "s%s%n", lines[0], locRef);
+                for (int i = 1; i < lines.length; i++) {
+                    indent();
+                    out.printf("    %s%n", lines[i]);
+                }
+            } else {
+                int padWidth = totalWidth - indentSize - locRef.length();
+                indent();
+                out.printf("  %-" + Math.max(padWidth, instr.length() + 2) + "s%s%n", instr, locRef);
+            }
 
             depth++;
         } catch (Exception e) {
@@ -305,8 +322,14 @@ public class CompactTraceListener implements TraceListener {
         // Message class may not exist in all Saxon versions
         if (t instanceof ResultDocument) return "result-document";
         if (t instanceof IterateInstr) return "iterate";
-        if (t instanceof Instruction) return t.getClass().getSimpleName().toLowerCase();
-        return t.getClass().getSimpleName();
+        // Filter out internal expression types that are noise in trace
+        String className = t.getClass().getSimpleName();
+        if (className.contains("Converter") || className.contains("Trace") ||
+            className.equals("DocumentInstr") || className.equals("Atomizer")) {
+            return null;  // Skip these in trace output
+        }
+        if (t instanceof Instruction) return className.toLowerCase();
+        return className;
     }
 
     private String getInstructionDetail(Traceable t, XPathContext context) {
@@ -401,24 +424,28 @@ public class CompactTraceListener implements TraceListener {
                 CallTemplate ct = (CallTemplate) t;
                 WithParam[] params = ct.getActualParams();
                 if (params != null && params.length > 0) {
-                    StringBuilder sb = new StringBuilder();
+                    List<String> paramStrs = new ArrayList<>();
                     for (WithParam wp : params) {
-                        if (sb.length() > 0) sb.append(", ");
-                        sb.append("$").append(wp.getVariableQName().getLocalPart());
+                        StringBuilder ps = new StringBuilder();
+                        ps.append("$").append(wp.getVariableQName().getLocalPart());
                         Expression select = wp.getSelectExpression();
                         if (select != null) {
                             // Try to get from expression's location (AttributeLocation)
                             String fromSource = getOriginalXPathFromExpr(select, "select");
                             if (fromSource != null) {
-                                sb.append("=").append(simplifyXPathInExpr(fromSource));
+                                ps.append("=").append(simplifyXPathInExpr(fromSource));
                             } else if (select instanceof StringLiteral) {
-                                sb.append("=\"").append(((StringLiteral) select).getString()).append("\"");
-                            } else {
-                                sb.append("=").append(simplifyXPathInExpr(select.toString()));
+                                ps.append("=\"").append(((StringLiteral) select).getString()).append("\"");
                             }
+                            // Skip verbose toString() for complex expressions - just show param name
                         }
+                        paramStrs.add(ps.toString());
                     }
-                    return "(" + sb + ")";
+                    // If more than 3 params, show one per line
+                    if (paramStrs.size() > 3) {
+                        return "\n    " + String.join("\n    ", paramStrs);
+                    }
+                    return "(" + String.join(", ", paramStrs) + ")";
                 }
                 return null;
             }
@@ -438,12 +465,11 @@ public class CompactTraceListener implements TraceListener {
             Expression select = lp.getSelectExpression();
             String fromSource = getOriginalXPathFromExpr(select, "select");
             if (fromSource != null) {
-                return "select=\"" + fromSource + "\"";
+                return ": " + simplifyXPathInExpr(fromSource);
             }
         } catch (Exception e) {
             // Ignore
         }
-        // No select in source - param value comes from with-param (not available at trace time)
         return null;
     }
 
