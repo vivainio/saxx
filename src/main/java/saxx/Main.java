@@ -146,6 +146,7 @@ public class Main implements Callable<Integer> {
 
         Matcher nsMatcher = nsPattern.matcher(json);
         int mockCount = 0;
+        int elemCount = 0;
 
         while (nsMatcher.find()) {
             String namespace = nsMatcher.group(1);
@@ -159,6 +160,11 @@ public class Main implements Callable<Integer> {
                 while (elemNameMatcher.find()) {
                     ignoredElements.add(elemNameMatcher.group(1));
                 }
+                // FORK FEATURE: Register extension element factory for this namespace (no-op elements)
+                // See saxon-work/ENHANCEMENTS.md for documentation
+                config.registerExtensionElementFactory(namespace,
+                    localName -> new net.sf.saxon.style.NoOpExtensionElement());
+                elemCount++;
             }
 
             Matcher fnMatcher = fnPattern.matcher(content);
@@ -175,9 +181,9 @@ public class Main implements Callable<Integer> {
             }
         }
 
-        if (mockCount > 0 || !ignoredElements.isEmpty()) {
-            System.out.printf("Registered %d mock function(s), %d ignored element(s)%n",
-                mockCount, ignoredElements.size());
+        if (mockCount > 0 || elemCount > 0) {
+            System.out.printf("Registered %d mock function(s), %d extension element namespace(s)%n",
+                mockCount, elemCount);
         }
     }
 
@@ -300,9 +306,15 @@ public class Main implements Callable<Integer> {
         @Option(names = {"-o", "--output"}, description = "Output file (stdout if omitted)")
         Path output,
         @Option(names = {"--trace"}, description = "Trace XSLT execution (node, instruction, location)")
-        boolean trace
+        boolean trace,
+        @Option(names = {"--mocks"}, description = "JSON file with mock extension function definitions")
+        Path mocksFile
     ) throws Exception {
         Processor processor = new Processor(false);
+
+        if (mocksFile != null) {
+            registerMocks(processor, mocksFile);
+        }
 
         if (trace) {
             processor.getUnderlyingConfiguration().setCompileWithTracing(true);

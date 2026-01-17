@@ -43,3 +43,7 @@ src/main/java/saxx/
 
 - Saxon-HE fork (downloaded via `tasks.py deps`)
 - picocli (from Maven Central)
+
+## Rules
+
+- Never write test outputs or temporary files to this repository directory
