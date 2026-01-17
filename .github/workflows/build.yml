@@ -20,12 +20,13 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
+      - name: Install zipget
+        uses: vivainio/actions/zipget@main
+
       - name: Download and install Saxon-HE-fork
         run: |
-          curl -sL https://github.com/vivainio/Saxon-HE-fork/archive/refs/heads/main.zip -o saxon.zip
-          unzip -q saxon.zip
-          cd Saxon-HE-fork-main
-          mvn -B install -DskipTests
+          zipget github vivainio/Saxon-HE-fork
+          mvn install:install-file -Dfile=Saxon-HE-fork-12.9.1.jar -DgroupId=net.sf.saxon -DartifactId=Saxon-HE-fork -Dversion=12.9.1 -Dpackaging=jar
 
       - name: Build and test
         run: mvn -B package --file pom.xml
