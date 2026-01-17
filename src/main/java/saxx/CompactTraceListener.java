@@ -36,6 +36,8 @@ public class CompactTraceListener implements TraceListener {
     private boolean showNextWhen = false;
     private static final Pattern SELECT_PATTERN = Pattern.compile("select\\s*=\\s*\"([^\"]*)\"|select\\s*=\\s*'([^']*)'");
     private static final Pattern TEST_PATTERN = Pattern.compile("test\\s*=\\s*\"([^\"]*)\"|test\\s*=\\s*'([^']*)'");
+    // Common XPath wrapper functions to unwrap for cleaner display
+    private static final Pattern NORMALIZE_SPACE_PATTERN = Pattern.compile("^(?:fn:)?normalize-space\\((.+)\\)$");
 
     public CompactTraceListener(PrintStream out) {
         this.out = out;
@@ -93,6 +95,38 @@ public class CompactTraceListener implements TraceListener {
             }
         }
         return null;
+    }
+
+    /**
+     * Unwrap normalize-space() wrapper for cleaner display.
+     * e.g., "normalize-space(cbc:ID)" -> "cbc:ID"
+     */
+    private String simplifyXPath(String xpath) {
+        if (xpath == null) return null;
+        Matcher m = NORMALIZE_SPACE_PATTERN.matcher(xpath);
+        if (m.matches()) {
+            return m.group(1);
+        }
+        return xpath;
+    }
+
+    /**
+     * Simplify XPath within a larger expression (e.g., conditions, parameters).
+     * Replaces all occurrences of normalize-space(X) with X.
+     */
+    private String simplifyXPathInExpr(String expr) {
+        if (expr == null) return null;
+        String result = expr;
+        // Iteratively remove normalize-space wrappers (handles nesting)
+        String prev;
+        do {
+            prev = result;
+            // Handle simple case: normalize-space(path) where path has no parens
+            result = result.replaceAll("(?:fn:)?normalize-space\\(([^()]+)\\)", "$1");
+            // Handle case with one level of nested parens: normalize-space(func(x))
+            result = result.replaceAll("(?:fn:)?normalize-space\\(([^()]*\\([^()]*\\)[^()]*)\\)", "$1");
+        } while (!result.equals(prev));
+        return result;
     }
 
     private String extractAttributeValue(String systemId, int line, String attrName) {
@@ -178,7 +212,7 @@ public class CompactTraceListener implements TraceListener {
                 String whenCond = findWhenCondition(loc.getSystemId(), line);
                 if (whenCond != null) {
                     indent();
-                    out.printf("  choose -> %s%n", whenCond);
+                    out.printf("  choose -> %s%n", simplifyXPathInExpr(whenCond));
                 }
             }
 
@@ -280,18 +314,18 @@ public class CompactTraceListener implements TraceListener {
     private String getInstructionDetail(Traceable t, XPathContext context) {
         try {
             if (t instanceof TemplateRule) {
-                return "match=\"" + ((TemplateRule) t).getMatchPattern().toShortString() + "\"";
+                return "match=\"" + simplifyXPathInExpr(((TemplateRule) t).getMatchPattern().toShortString()) + "\"";
             }
             if (t instanceof ApplyTemplates) {
                 Expression select = ((ApplyTemplates) t).getSelectExpression();
                 if (select != null) {
-                    return "select=\"" + select.toShortString() + "\"";
+                    return "select=\"" + simplifyXPathInExpr(select.toShortString()) + "\"";
                 }
             }
             if (t instanceof ForEach) {
                 Expression select = ((ForEach) t).getSelectExpression();
                 if (select != null) {
-                    return "select=\"" + select.toShortString() + "\"";
+                    return "select=\"" + simplifyXPathInExpr(select.toShortString()) + "\"";
                 }
             }
             if (t instanceof Choose) {
@@ -317,11 +351,11 @@ public class CompactTraceListener implements TraceListener {
                 Location loc = t.getLocation();
                 String fromSource = extractSelect(loc.getSystemId(), loc.getLineNumber());
                 if (fromSource != null) {
-                    return fromSource;
+                    return simplifyXPathInExpr(fromSource);
                 }
                 // Fallback to Saxon's representation
                 if (select != null) {
-                    return select.toShortString();
+                    return simplifyXPathInExpr(select.toShortString());
                 }
             }
             if (t instanceof FixedElement) {
@@ -370,11 +404,11 @@ public class CompactTraceListener implements TraceListener {
                             Location loc = wp.getSelectOperand().getChildExpression().getLocation();
                             String fromSource = extractSelect(loc.getSystemId(), loc.getLineNumber());
                             if (fromSource != null) {
-                                sb.append("=").append(fromSource);
+                                sb.append("=").append(simplifyXPathInExpr(fromSource));
                             } else if (select instanceof StringLiteral) {
                                 sb.append("=\"").append(((StringLiteral) select).getString()).append("\"");
                             } else {
-                                sb.append("=").append(select.toShortString());
+                                sb.append("=").append(simplifyXPathInExpr(select.toShortString()));
                             }
                         }
                     }
