@@ -262,6 +262,10 @@ public class CompactTraceListener implements TraceListener {
     @Override
     public void leave(Traceable traceable) {
         if (depth > 0) depth--;
+        if (traceable instanceof Block) {
+            indent();
+            out.println("  }");
+        }
     }
 
     @Override
@@ -308,7 +312,7 @@ public class CompactTraceListener implements TraceListener {
         if (t instanceof FixedAttribute) return "";
         if (t instanceof Comment) return "comment";
         if (t instanceof ProcessingInstruction) return "pi";
-        if (t instanceof Block) return "block";
+        if (t instanceof Block) return "{";
         if (t instanceof NamedTemplate) {
             NamedTemplate nt = (NamedTemplate) t;
             return nt.getTemplateName() != null
@@ -415,10 +419,6 @@ public class CompactTraceListener implements TraceListener {
                     }
                 }
                 return "@" + attrName;
-            }
-            if (t instanceof Block) {
-                int size = ((Block) t).size();
-                return "[" + size + " items]";
             }
             if (t instanceof CallTemplate) {
                 CallTemplate ct = (CallTemplate) t;
